@@ -8,31 +8,38 @@
 #
 from nose import main as testmain
 from nose import SkipTest
-import re, sys, getopt, time
+import re
+import sys
+import getopt
+import time
 from subprocess import Popen, PIPE
 from StringIO import StringIO
 
 verbose = False
 
+
 def dprint(s):
     global verbose
     if verbose:
         print >>sys.stderr, s
-    
-class JStack():
+
+
+class JStack(object):
 
     # jstack states, see http://docs.oracle.com/javase/1.5.0/docs/api/java/lang/Thread.State.html
-    STATES = ('NEW','BLOCKED','TERMINATED','RUNNABLE','WAITING','TIMED_WAITING')
-    
+    STATES = ('NEW', 'BLOCKED', 'TERMINATED', 'RUNNABLE', 'WAITING',
+              'TIMED_WAITING')
+
     class AlreadyParsedError(Exception):
         pass
+
     def __init__(self, s_stack):
         """initialize jstack with the output of jstack command"""
         self.output = s_stack
         self.threads = []
         self.state_tot = dict(zip(JStack.STATES, [0 for x in JStack.STATES]))
         self.parsed = False
-        
+
         # finally parse
         self.parse()
 
@@ -43,15 +50,16 @@ class JStack():
         """
         if self.parsed:
             raise JStack.AlreadyParsedError
-        
-        class en_thread():
+
+        class en_thread(object):
             pass
-        
+
         # regular expressions for parsing
         sre_class = r'[A-z][A-z0-9.]+[A-z]'
         re_thread = re.compile(r'^"([^\"]+)"\s+(daemon )?prio=([0-9]+) tid=(0x[0-9a-f]+) nid=0x[0-9a-f]+ (in [^ ]+|runnable)')
-        (en_thread.SOCK, en_thread.DAEMON, en_thread.PRIO, en_thread.TID, en_thread.WCHAN) = range(1,6)
-        re_trace = re.compile(r'^\s+at ('+sre_class+')\(([^ ]+)\)')
+        (en_thread.SOCK, en_thread.DAEMON, en_thread.PRIO,
+         en_thread.TID, en_thread.WCHAN) = range(1, 6)
+        re_trace = re.compile(r'^\s+at (' + sre_class + ')\(([^ ]+)\)')
         re_trace = re.compile(r'^\s+at (.+)$')
         re_state = re.compile(r'^\s+java.lang.Thread.State: ([^ ]+)')
 
@@ -70,36 +78,35 @@ class JStack():
             m_thread = re_thread.match(line)
             m_trace = re_trace.match(line)
             m_state = re_state.match(line)
-            
+
             if m_thread:
                 """initialize a threa variable"""
-                dprint ("\t thread:[%s]" % m_thread.group(en_thread.SOCK))
-                thread = {'sock' :    m_thread.group(en_thread.SOCK),
-                    'id' : m_thread.group(en_thread.TID),
-                    'daemon' : m_thread.group(en_thread.DAEMON),
-                    'wchan' : m_thread.group(en_thread.WCHAN).strip().replace("in ",""),
-                    'trace' : dict(),
-                    'state' : None}
+                dprint("\t thread:[%s]" % m_thread.group(en_thread.SOCK))
+                thread = {'sock': m_thread.group(en_thread.SOCK),
+                          'id': m_thread.group(en_thread.TID),
+                          'daemon': m_thread.group(en_thread.DAEMON),
+                          'wchan': m_thread.group(en_thread.WCHAN).strip().replace("in ", ""),
+                          'trace': dict(),
+                          'state': None}
                 self.threads.append(thread)
-                
+
             elif thread and m_state:
                 dprint("\t state: %s" % m_state.group(1))
                 state = m_state.group(1)
                 thread['state'] = state
                 self.state_tot[state] += 1
                 dprint("\t state_tot[%s]: %d" % (state, self.state_tot[state]))
-                
+
             elif thread and m_trace:
                 """update trace until it points to another thread"""
-                assert thread['trace'] != None
-                dprint    ("\t trace: [%s]" % m_trace.group(1))
-                thread['trace'].setdefault(m_trace.group(1),0)
+                assert thread['trace'] is not None
+                dprint("\t trace: [%s]" % m_trace.group(1))
+                thread['trace'].setdefault(m_trace.group(1), 0)
                 thread['trace'][m_trace.group(1)] += 1
-                dprint ("trace %s" % thread['trace'])
-                
-        dprint ("threads: %s" % self.threads)
-        self.parsed = True
+                dprint("trace %s" % thread['trace'])
 
+        dprint("threads: %s" % self.threads)
+        self.parsed = True
 
     def wchan(self):
         """ reverse map of wait channel and threads.
@@ -114,10 +121,10 @@ class JStack():
             chans.setdefault(wc, [])
             chans[wc].append(x['sock'])
 
-        dprint ("wchan: %s"    % chans)
+        dprint("wchan: %s" % chans)
         return chans
 
-    def joint(self, state = None, sock = None):
+    def joint(self, state=None, sock=None):
         """ print_summary of all methods count.
 
             eg. {
@@ -125,52 +132,57 @@ class JStack():
             methodB: 35,
                 }
         """
-        dprint("joint. state: %s, sock: %s" % (state,sock))
+        dprint("joint. state: %s, sock: %s" % (state, sock))
 
         assert self.threads
-        if state: assert state in JStack.STATES
-        
+        if state:
+            assert state in JStack.STATES
+
         traces = dict()
         for t in self.threads:
             # eventually filter by state
-            if state and t['state'] != state: continue
-            if sock and (t['sock'].find(sock)==-1): continue
-            else: dprint("joint: checking sock: %s" % t['sock'])
-            
-            for (c,v) in t['trace'].iteritems():
-                traces.setdefault(c,0)
+            if state and t['state'] != state:
+                continue
+            if sock and (t['sock'].find(sock) == -1):
+                continue
+            else:
+                dprint("joint: checking sock: %s" % t['sock'])
+
+            for (c, v) in t['trace'].iteritems():
+                traces.setdefault(c, 0)
                 traces[c] += v
 
         return traces
 
-    def print_summary(self, limit = 0, threshold = 0):
+    def print_summary(self, limit=0, threshold=0):
         print "Total threads: %d\n" % len(self.threads)
         for s in self.state_tot.iteritems():
             print "\tstate: %-15s %10d" % s
-            
-        
-        for (chan,threads) in self.wchan().iteritems():
+
+        for (chan, threads) in self.wchan().iteritems():
             print "\twchan: %s for %d threads" % (chan, len(threads))
 
         trace_count = self.joint()
         dprint("\ntrace_count: %s" % trace_count)
-        JStack.print_summary_trace(trace_count, limit=limit, threshold=threshold)
+        JStack.print_summary_trace(
+            trace_count, limit=limit, threshold=threshold)
 
     def csv(self):
         print "%5d " % len(self.threads),
         for s in JStack.STATES:
             print "%5d " % self.state_tot[s],
 
-
     @staticmethod
-    def print_summary_trace(trace_count, limit = 0, threshold = 0):
+    def print_summary_trace(trace_count, limit=0, threshold=0):
         """Prints the trace counter, that should be a list of vectors"""
         assert isinstance(trace_count, dict) == True
-        print "Most frequent calls (limit: %d, threshold: %s):" % (limit, threshold)
-        if limit == 0: limit -= 1
+        print "Most frequent calls (limit: %d, threshold: %s):" % (
+            limit, threshold)
+        if limit == 0:
+            limit -= 1
         dprint("\ntrace_count: %s" % trace_count)
-        for tc in sorted(trace_count.iteritems(), key=lambda x:x[1], reverse=True):
-            if limit==0:
+        for tc in sorted(trace_count.iteritems(), key=lambda x: x[1], reverse=True):
+            if limit == 0:
                 break
             if tc[1] < threshold:
                 break
@@ -179,25 +191,25 @@ class JStack():
             limit -= 1
 
     @staticmethod
-    def sum(tot,stack_new, state = None, sock=None):
+    def sum(tot, stack_new, state=None, sock=None):
         """Return a dictionary with thread counters."""
-        dprint ("Summing jstats: state:%s,sock:%s" % (state, sock))
+        dprint("Summing jstats: state:%s,sock:%s" % (state, sock))
         threads_tot = dict()
-        thread_union = [x for x in tot.iteritems() ]
-        thread_union.extend([x for x in stack_new.joint(state=state,sock=sock).iteritems()])
-        dprint ("thread_union: %s" % thread_union)
-        for (k,v) in thread_union:
-            dprint ("k: %s" % k)
-            threads_tot.setdefault(k,0)
+        thread_union = [x for x in tot.iteritems()]
+        thread_union.extend(
+            [x for x in stack_new.joint(state=state, sock=sock).iteritems()])
+        dprint("thread_union: %s" % thread_union)
+        for (k, v) in thread_union:
+            dprint("k: %s" % k)
+            threads_tot.setdefault(k, 0)
             threads_tot[k] += v
         return threads_tot
 
 
-
-class TestJStack():
+class TestJStack(object):
     global verbose
     stack = None
-    s_jstack_out="""
+    s_jstack_out = """
 "Attach Listener" daemon prio=10 tid=0x51a6b000 nid=0x118e runnable [0x00000000]
     java.lang.Thread.State: RUNNABLE
 
@@ -255,37 +267,37 @@ class TestJStack():
      Locked ownable synchronizers:
                 - None
 
-                
+
 """
 
     def setUp(self):
         self.stack = JStack(self.s_jstack_out)
-    
+
     def test_sock(self):
         j_threads = self.stack.threads
-        thread_sockets = [ x['sock'] for x in j_threads]
+        thread_sockets = [x['sock'] for x in j_threads]
         assert len(j_threads) == 5
-        
-        expected = ['Attach Listener', "JBoss System Threads(1)-1" ]
-        expected.extend(["http-0.0.0.0-8080-%d"%i for i in [4,5,6]])
-        for sock in expected:
-            assert sock in thread_sockets, "Expecting %s in %s" % (sock, thread_sockets)
 
+        expected = ['Attach Listener', "JBoss System Threads(1)-1"]
+        expected.extend(["http-0.0.0.0-8080-%d" % i for i in [4, 5, 6]])
+        for sock in expected:
+            assert sock in thread_sockets, "Expecting %s in %s" % (
+                sock, thread_sockets)
 
     def test_wchan(self):
         j_wchan = self.stack.wchan()
         assert 'Object.wait()' in j_wchan
-        expected = ["http-0.0.0.0-8080-%d"%i for i in [4,5,6]]
+        expected = ["http-0.0.0.0-8080-%d" % i for i in [4, 5, 6]]
         for sock in expected:
             assert sock in j_wchan['Object.wait()']
-            
+
     def test_state(self):
         j_state = self.stack.state_tot
         assert 'RUNNABLE' in j_state
         assert 'WAITING' in j_state
         assert j_state['RUNNABLE'] == 2
-        assert j_state['WAITING'] == 3, "expected: 3, had %d" % j_state['WAITING']
-
+        assert j_state[
+            'WAITING'] == 3, "expected: 3, had %d" % j_state['WAITING']
 
     def test_joint(self):
         t = self.stack.joint()
@@ -306,8 +318,8 @@ class TestJStack():
     def test_joint_sock_2(self):
         expected_stacktrace_size = 5
         t_2 = self.stack.joint(sock="http")
-        assert len(t_2) == expected_stacktrace_size, "Expecting %d, was %d" % (expected_stacktrace_size, len(t_2))
-
+        assert len(t_2) == expected_stacktrace_size, "Expecting %d, was %d" % (
+            expected_stacktrace_size, len(t_2))
 
     def test_summary(self):
         self.stack.print_summary()
@@ -316,9 +328,9 @@ class TestJStack():
         threads_first = JStack.sum(dict(), self.stack)
         threads_tot = JStack.sum(threads_first, self.stack)
         assert threads_tot
-        for (k,v) in threads_tot.iteritems():
-            dprint ("threads_tot: k: %s,%s"%(k,v))
-            assert v%2 == 0
+        for (k, v) in threads_tot.iteritems():
+            dprint("threads_tot: k: %s,%s" % (k, v))
+            assert v % 2 == 0
         JStack.print_summary_trace(threads_tot, 0, 0)
 
     def test_sum_sock_1(self):
@@ -338,9 +350,6 @@ class TestJStack():
         assert len(threads_first) < len(threads_tot)
 
 
-
-
-
 #
 # The Program
 #
@@ -350,25 +359,29 @@ def usage():
     print "\t parse jstack output giving some statistics"
     print "\t number of threads, thread waiting and running"
     print "\t waiting channels"
-    print "\t -s state of the process to filter: %s" % [x for x in JStack.STATES]
+    print "\t -s state of the process to filter: %s" % [
+        x for x in JStack.STATES]
     print "\t -j pid of the jvm to trace"
     print "\t -i interval in seconds between each check"
     print "\t -l number of methods to report"
     print "\t -n thread name"
-    
+
     exit(2)
+
 
 def main():
     global verbose
     print "running main"
-    
-    (argc,argv) = (len(sys.argv), sys.argv)
-    (limit,threshold,interval,state,jid,sock) = (0,0,0,None,None,None)
+
+    (argc, argv) = (len(sys.argv), sys.argv)
+    (limit, threshold, interval, state, jid, sock) = (0, 0, 0, None,
+                                                      None, None)
     try:
             opts, args = getopt.getopt(argv[1:], "hvi:j:l:n:s:t:", ["help"])
     except getopt.GetoptError, err:
             # print help information and exit:
-            print str(err) # will print something like "option -a not recognized"
+            print str(
+                err)  # will print something like "option -a not recognized"
             usage()
             sys.exit(2)
     for o, a in opts:
@@ -391,25 +404,23 @@ def main():
         else:
                 assert False, "unhandled option"
 
-    
     assert jid, usage()
-    
+
     tot = dict()
-    
+
     while True:
-        p = Popen(["jstack","-l",jid], stdout=PIPE, stderr=PIPE)
-        s_jstack_out,stderr = p.communicate()
+        p = Popen(["jstack", "-l", jid], stdout=PIPE, stderr=PIPE)
+        s_jstack_out, stderr = p.communicate()
         jstack = JStack(s_jstack_out)
-        
+
         if not interval:
-            jstack.print_summary(limit=limit,threshold=threshold)
+            jstack.print_summary(limit=limit, threshold=threshold)
             break
-            
+
         tot = JStack.sum(tot, jstack, state, sock)
         JStack.print_summary_trace(tot, limit=limit, threshold=threshold)
 
         time.sleep(1)
-            
+
 if __name__ == '__main__':
     exit(main())
-
